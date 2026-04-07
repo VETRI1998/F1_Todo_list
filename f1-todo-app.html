@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>F1 Race Day Tasks — Pit Wall Command Center</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;600;700&display=swap" rel="stylesheet"/>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --red: #e10600;
+    --red-hot: #ff2010;
+    --gold: #f5a623;
+    --green: #4cd964;
+    --border-red: rgba(225,6,0,0.28);
+    --text-dim: rgba(255,255,255,0.45);
+    --text-muted: rgba(255,255,255,0.22);
+  }
+
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+
+  /* ── VIDEO BACKGROUND ── */
+  #bg-video {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    min-width: 100vw; min-height: 100vh;
+    width: auto; height: auto;
+    object-fit: cover;
+    z-index: 0;
+    opacity: 0;
+    transition: opacity 1.4s ease;
+  }
+  #bg-video.loaded { opacity: 1; }
+
+  /* ── OVERLAYS ── */
+  .overlay { position:fixed; inset:0; z-index:1; background:linear-gradient(160deg,rgba(100,0,0,0.50) 0%,rgba(8,8,8,0.58) 45%,rgba(0,0,0,0.80) 100%); pointer-events:none; }
+  .vignette { position:fixed; inset:0; z-index:2; background:radial-gradient(ellipse at center,transparent 38%,rgba(0,0,0,0.78) 100%); pointer-events:none; }
+  .scanlines { position:fixed; inset:0; z-index:3; background:repeating-linear-gradient(to bottom,transparent 0px,transparent 3px,rgba(0,0,0,0.06) 3px,rgba(0,0,0,0.06) 4px); pointer-events:none; }
+
+  /* ── LOADING ── */
+  #loading { position:fixed; inset:0; z-index:100; background:#000; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:24px; transition:opacity 0.8s ease; }
+  #loading.hide { opacity:0; pointer-events:none; }
+  .loading-title { font-family:'Orbitron',sans-serif; font-size:30px; font-weight:900; color:#fff; letter-spacing:6px; text-transform:uppercase; }
+  .loading-title span { color:var(--red); }
+  .loading-bar-track { width:300px; height:3px; background:rgba(255,255,255,0.08); }
+  .loading-bar-fill { height:100%; background:linear-gradient(90deg,var(--red),#ff6b35); width:0%; animation:loadBar 2s ease forwards; }
+  @keyframes loadBar { to{width:100%} }
+  .loading-sub { font-family:'Rajdhani',sans-serif; font-size:12px; letter-spacing:3px; color:var(--text-dim); text-transform:uppercase; animation:pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:0.3} 50%{opacity:1} }
+
+  /* ── LIGHTS OUT ── */
+  #lights-out { position:fixed; inset:0; z-index:90; display:flex; align-items:center; justify-content:center; gap:22px; pointer-events:none; opacity:0; background:rgba(0,0,0,0.75); transition:opacity 0.5s ease; }
+  #lights-out.show { opacity:1; }
+  .race-light { width:44px; height:44px; border-radius:50%; background:#1a0000; border:2px solid rgba(225,6,0,0.3); opacity:0; transform:scale(0.4); transition:all 0.3s ease; }
+  .race-light.on { opacity:1; transform:scale(1); background:var(--red); box-shadow:0 0 30px var(--red),0 0 60px rgba(225,6,0,0.6); }
+  .race-light.off { background:#111; box-shadow:none; border-color:rgba(255,255,255,0.05); }
+
+  /* ── LAYOUT ── */
+  #app { position:fixed; inset:0; z-index:10; overflow-y:auto; overflow-x:hidden; padding:26px 20px 70px; display:flex; flex-direction:column; align-items:center; scrollbar-width:thin; scrollbar-color:var(--red) transparent; }
+  #app::-webkit-scrollbar { width:4px; }
+  #app::-webkit-scrollbar-thumb { background:var(--red); }
+  .main-container { width:100%; max-width:750px; }
+
+  /* ── HEADER ── */
+  .header { text-align:center; margin-bottom:28px; animation:fadeDown 0.7s 2.6s both; }
+  @keyframes fadeDown { from{opacity:0;transform:translateY(-18px)} to{opacity:1;transform:translateY(0)} }
+  .f1-logo-bar { display:flex; align-items:center; gap:14px; margin-bottom:8px; }
+  .f1-stripe { height:3px; flex:1; background:linear-gradient(90deg,transparent,var(--red),#ff5533); }
+  .f1-stripe.r { background:linear-gradient(90deg,#ff5533,var(--red),transparent); }
+  .f1-badge { background:var(--red); color:#fff; font-family:'Orbitron',sans-serif; font-weight:900; font-size:12px; letter-spacing:3px; padding:5px 16px; clip-path:polygon(8px 0%,100% 0%,calc(100% - 8px) 100%,0% 100%); text-transform:uppercase; white-space:nowrap; }
+  h1 { font-family:'Orbitron',sans-serif; font-size:clamp(24px,5vw,46px); font-weight:900; color:#fff; text-transform:uppercase; letter-spacing:5px; text-shadow:0 0 40px rgba(225,6,0,0.85),0 0 80px rgba(225,6,0,0.35),0 3px 12px rgba(0,0,0,0.95); margin-bottom:5px; }
+  h1 span { color:var(--red); }
+  .header-sub { font-family:'Rajdhani',sans-serif; font-size:11px; color:var(--text-dim); letter-spacing:4px; text-transform:uppercase; }
+
+  /* ── STATS ── */
+  .race-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:20px; animation:fadeUp 0.6s 2.8s both; }
+  @keyframes fadeUp { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
+  .stat-card { background:rgba(0,0,0,0.65); border:1px solid var(--border-red); border-top:2px solid var(--red); padding:14px 10px; text-align:center; clip-path:polygon(0 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%); transition:border-color 0.2s,background 0.2s; }
+  .stat-card:hover { border-color:rgba(225,6,0,0.55); background:rgba(0,0,0,0.78); }
+  .stat-value { font-family:'Orbitron',sans-serif; font-size:30px; font-weight:700; color:var(--red); display:block; text-shadow:0 0 20px rgba(225,6,0,0.5); }
+  .stat-label { font-family:'Rajdhani',sans-serif; font-size:9px; color:var(--text-dim); letter-spacing:2px; text-transform:uppercase; }
+
+  /* ── INPUT ── */
+  .input-panel { background:rgba(0,0,0,0.78); border:1px solid var(--border-red); border-left:4px solid var(--red); padding:16px 20px; margin-bottom:14px; display:flex; gap:10px; align-items:center; animation:fadeUp 0.6s 2.9s both; }
+  .input-panel input[type="text"] { flex:1; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.12); border-radius:0; color:#fff; font-family:'Rajdhani',sans-serif; font-size:16px; padding:11px 14px; outline:none; letter-spacing:0.5px; transition:border-color 0.2s,box-shadow 0.2s; }
+  .input-panel input::placeholder { color:rgba(255,255,255,0.25); }
+  .input-panel input:focus { border-color:var(--red); box-shadow:0 0 18px rgba(225,6,0,0.28),inset 0 0 8px rgba(225,6,0,0.06); }
+  .priority-select { background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); color:rgba(255,255,255,0.85); font-family:'Rajdhani',sans-serif; font-size:13px; padding:11px 10px; outline:none; cursor:pointer; letter-spacing:1px; }
+  .priority-select option { background:#111; }
+  .add-btn { background:var(--red); color:#fff; border:none; font-family:'Orbitron',sans-serif; font-size:12px; font-weight:700; letter-spacing:2px; padding:12px 24px; cursor:pointer; text-transform:uppercase; clip-path:polygon(9px 0%,100% 0%,calc(100% - 9px) 100%,0% 100%); transition:background 0.15s,transform 0.1s,box-shadow 0.2s; white-space:nowrap; }
+  .add-btn:hover { background:var(--red-hot); box-shadow:0 0 28px rgba(225,6,0,0.65); transform:scale(1.04); }
+  .add-btn:active { transform:scale(0.97); }
+
+  /* ── FILTERS ── */
+  .filter-bar { display:flex; gap:7px; margin-bottom:16px; flex-wrap:wrap; align-items:center; animation:fadeUp 0.6s 3s both; }
+  .filter-btn { background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); color:rgba(255,255,255,0.42); font-family:'Rajdhani',sans-serif; font-size:11px; font-weight:600; letter-spacing:2px; padding:6px 15px; cursor:pointer; text-transform:uppercase; transition:all 0.15s; }
+  .filter-btn.active,.filter-btn:hover { background:rgba(225,6,0,0.18); border-color:var(--red); color:#fff; }
+  .clear-btn { background:transparent; border:1px solid rgba(255,255,255,0.08); color:var(--text-muted); font-family:'Rajdhani',sans-serif; font-size:10px; letter-spacing:2px; padding:6px 14px; cursor:pointer; text-transform:uppercase; transition:all 0.15s; margin-left:auto; }
+  .clear-btn:hover { color:var(--red); border-color:var(--red); }
+
+  .section-label { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
+  .section-label span { font-family:'Orbitron',sans-serif; font-size:9px; color:rgba(255,255,255,0.26); letter-spacing:3px; text-transform:uppercase; white-space:nowrap; }
+  .section-line { flex:1; height:1px; background:rgba(255,255,255,0.07); }
+
+  /* ── TODOS ── */
+  .todo-list { display:flex; flex-direction:column; gap:7px; margin-bottom:4px; animation:fadeUp 0.6s 3.1s both; }
+  .todo-item { background:rgba(0,0,0,0.76); border:1px solid rgba(255,255,255,0.07); border-left:3px solid transparent; padding:13px 16px; display:flex; align-items:center; gap:12px; transition:all 0.22s; position:relative; overflow:hidden; animation:itemIn 0.28s ease; }
+  @keyframes itemIn { from{opacity:0;transform:translateX(-14px)} to{opacity:1;transform:translateX(0)} }
+  .todo-item::after { content:''; position:absolute; top:0; left:0; width:0; height:2px; background:var(--red); transition:width 0.4s ease; }
+  .todo-item:hover::after { width:100%; }
+  .todo-item:hover { border-color:rgba(225,6,0,0.22); background:rgba(15,5,5,0.86); transform:translateX(3px); }
+  .todo-item.ph { border-left-color:var(--red); }
+  .todo-item.pm { border-left-color:var(--gold); }
+  .todo-item.pl { border-left-color:var(--green); }
+  .todo-item.done { opacity:0.4; }
+  .todo-item.done .todo-text { text-decoration:line-through; color:rgba(255,255,255,0.3); }
+
+  .cbx { width:20px; height:20px; border:2px solid rgba(225,6,0,0.45); display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; transition:all 0.15s; clip-path:polygon(3px 0%,100% 0%,calc(100% - 3px) 100%,0% 100%); }
+  .cbx:hover { border-color:var(--red); background:rgba(225,6,0,0.1); }
+  .cbx.chk { background:var(--red); border-color:var(--red); }
+  .chk-ic { color:#fff; font-size:11px; font-weight:700; display:none; }
+  .cbx.chk .chk-ic { display:block; }
+
+  .todo-text { flex:1; font-family:'Rajdhani',sans-serif; font-size:15px; color:rgba(255,255,255,0.88); letter-spacing:0.4px; }
+  .pbadge { font-family:'Orbitron',sans-serif; font-size:8px; letter-spacing:1.2px; padding:3px 9px; text-transform:uppercase; flex-shrink:0; }
+  .pbadge.high { background:rgba(225,6,0,0.17); color:#ff5555; border:1px solid rgba(225,6,0,0.3); }
+  .pbadge.medium { background:rgba(245,166,35,0.12); color:var(--gold); border:1px solid rgba(245,166,35,0.25); }
+  .pbadge.low { background:rgba(76,217,100,0.1); color:var(--green); border:1px solid rgba(76,217,100,0.22); }
+  .del-btn { background:none; border:1px solid rgba(255,255,255,0.08); color:rgba(255,255,255,0.2); width:28px; height:28px; cursor:pointer; font-size:13px; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:all 0.15s; }
+  .del-btn:hover { color:var(--red); border-color:var(--red); background:rgba(225,6,0,0.1); }
+
+  .empty-state { text-align:center; padding:48px 20px; border:1px dashed rgba(255,255,255,0.07); }
+  .empty-state p { font-family:'Rajdhani',sans-serif; font-size:13px; color:rgba(255,255,255,0.22); letter-spacing:2.5px; text-transform:uppercase; }
+  .empty-sub { margin-top:6px; font-size:11px !important; opacity:0.5; }
+
+  /* ── SPEED BAR ── */
+  .speed-bar-wrap { margin-top:22px; padding:14px 18px; background:rgba(0,0,0,0.65); border:1px solid rgba(255,255,255,0.06); animation:fadeUp 0.6s 3.2s both; }
+  .speed-bar-label { display:flex; justify-content:space-between; font-family:'Rajdhani',sans-serif; font-size:9px; color:var(--text-dim); letter-spacing:2px; text-transform:uppercase; margin-bottom:8px; }
+  .speed-bar-track { height:6px; background:rgba(255,255,255,0.06); overflow:hidden; position:relative; }
+  .speed-bar-fill { height:100%; background:linear-gradient(90deg,var(--red),#ff6b35,var(--gold)); transition:width 0.6s cubic-bezier(0.4,0,0.2,1); position:relative; }
+  .speed-bar-fill::after { content:''; position:absolute; right:0; top:-2px; width:3px; height:10px; background:#fff; box-shadow:0 0 8px #fff; }
+  .speed-segs { display:flex; justify-content:space-between; margin-top:5px; }
+  .speed-seg { font-family:'Rajdhani',sans-serif; font-size:8px; color:rgba(255,255,255,0.18); letter-spacing:1px; }
+
+  /* ── HUD ── */
+  .hud-corner { position:fixed; top:18px; right:20px; z-index:20; background:rgba(0,0,0,0.82); border:1px solid var(--border-red); padding:10px 18px; text-align:center; clip-path:polygon(6px 0%,100% 0%,calc(100% - 6px) 100%,0% 100%); animation:fadeUp 0.6s 3.3s both; }
+  .hud-label { font-family:'Orbitron',sans-serif; font-size:9px; color:var(--red); display:block; letter-spacing:2px; }
+  .hud-corner strong { font-family:'Orbitron',sans-serif; font-size:26px; color:#fff; font-weight:700; display:block; }
+
+  /* ── TELEMETRY ── */
+  .telemetry { position:fixed; bottom:0; left:0; right:0; z-index:20; background:rgba(0,0,0,0.90); border-top:2px solid var(--red); padding:7px 24px; display:flex; gap:28px; align-items:center; font-family:'Orbitron',sans-serif; font-size:10px; letter-spacing:2px; color:rgba(255,255,255,0.38); text-transform:uppercase; }
+  .tel-item strong { color:var(--red); }
+  .tel-scroll { flex:1; overflow:hidden; white-space:nowrap; font-family:'Rajdhani',sans-serif; font-size:11px; letter-spacing:3px; color:rgba(255,255,255,0.26); }
+  .tel-inner { display:inline-block; animation:scrollTxt 22s linear infinite; }
+  @keyframes scrollTxt { from{transform:translateX(60vw)} to{transform:translateX(-100%)} }
+
+  /* ── VIDEO ERROR ── */
+  #video-error { display:none; position:fixed; bottom:60px; left:50%; transform:translateX(-50%); z-index:50; background:rgba(0,0,0,0.92); border:1px solid var(--border-red); border-left:3px solid var(--red); padding:14px 22px; font-family:'Rajdhani',sans-serif; font-size:13px; color:rgba(255,255,255,0.7); letter-spacing:1px; max-width:560px; width:90%; text-align:center; line-height:1.7; }
+  #video-error strong { color:var(--red); display:block; margin-bottom:6px; font-family:'Orbitron',sans-serif; font-size:11px; letter-spacing:2px; }
+  #video-error code { color:var(--gold); font-size:11px; word-break:break-all; display:block; margin-top:6px; padding:6px 8px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); }
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading">
+  <div class="loading-title">F1 <span>RACE</span> DAY</div>
+  <div class="loading-bar-track"><div class="loading-bar-fill"></div></div>
+  <div class="loading-sub">Preparing the grid...</div>
+</div>
+
+<!-- Lights out -->
+<div id="lights-out">
+  <div class="race-light" id="l1"></div>
+  <div class="race-light" id="l2"></div>
+  <div class="race-light" id="l3"></div>
+  <div class="race-light" id="l4"></div>
+  <div class="race-light" id="l5"></div>
+</div>
+
+<!--
+  ╔══════════════════════════════════════════════════════════╗
+  ║  LOCAL VIDEO BACKGROUND                                  ║
+  ║  Place this HTML file in the SAME FOLDER as your video  ║
+  ╚══════════════════════════════════════════════════════════╝
+-->
+<video id="bg-video" autoplay muted loop playsinline>
+  <source src="1.webm" type="video/webm">
+</video>
+
+<div class="overlay"></div>
+<div class="vignette"></div>
+<div class="scanlines"></div>
+
+<!-- Error hint if video not found -->
+<div id="video-error">
+  <strong>⚠ VIDEO FILE NOT FOUND</strong>
+  Place this HTML file in the same folder as your video.<br/>
+  Expected filename:
+  <code>Viral F1 Racing Wallpaper 🔥 _ Clean 4K Cinematic _f1 _redbull _wallpaper _4k(4K_60FPS).webm</code>
+</div>
+
+<!-- HUD -->
+<div class="hud-corner">
+  <span class="hud-label">TASKS</span>
+  <strong id="lap-num">0</strong>
+  <span class="hud-label">GRID</span>
+</div>
+
+<!-- App -->
+<div id="app">
+  <div class="main-container">
+
+    <div class="header">
+      <div class="f1-logo-bar">
+        <div class="f1-stripe"></div>
+        <div class="f1-badge">Formula 1</div>
+        <div class="f1-stripe r"></div>
+      </div>
+      <h1>RACE <span>DAY</span> TASKS</h1>
+      <p class="header-sub">Pit Wall Command Center</p>
+    </div>
+
+    <div class="race-stats">
+      <div class="stat-card"><span class="stat-value" id="st-total">0</span><span class="stat-label">Total Laps</span></div>
+      <div class="stat-card"><span class="stat-value" id="st-done">0</span><span class="stat-label">Completed</span></div>
+      <div class="stat-card"><span class="stat-value" id="st-pct">0%</span><span class="stat-label">Race Progress</span></div>
+    </div>
+
+    <div class="input-panel">
+      <input type="text" id="task-input" placeholder="Enter your pit stop task..." maxlength="90"/>
+      <select class="priority-select" id="prio-sel">
+        <option value="high">🔴 HIGH</option>
+        <option value="medium" selected>🟡 MEDIUM</option>
+        <option value="low">🟢 LOW</option>
+      </select>
+      <button class="add-btn" id="add-btn">+ PIT IN</button>
+    </div>
+
+    <div class="filter-bar">
+      <button class="filter-btn active" data-f="all">All</button>
+      <button class="filter-btn" data-f="active">Active</button>
+      <button class="filter-btn" data-f="done">Done</button>
+      <button class="filter-btn" data-f="high">High</button>
+      <button class="filter-btn" data-f="medium">Medium</button>
+      <button class="filter-btn" data-f="low">Low</button>
+      <button class="clear-btn" id="clear-done">Clear Done</button>
+    </div>
+
+    <div class="section-label">
+      <div class="section-line"></div>
+      <span id="f-label">All Tasks</span>
+      <div class="section-line"></div>
+    </div>
+
+    <div class="todo-list" id="todo-list">
+      <div class="empty-state" id="empty">
+        <p>No tasks on the grid</p>
+        <p class="empty-sub">Add your first pit stop task above</p>
+      </div>
+    </div>
+
+    <div class="speed-bar-wrap">
+      <div class="speed-bar-label">
+        <span>⚡ Race Completion</span>
+        <span id="spd-pct">0%</span>
+      </div>
+      <div class="speed-bar-track">
+        <div class="speed-bar-fill" id="spd-bar" style="width:0%"></div>
+      </div>
+      <div class="speed-segs">
+        <span class="speed-seg">START</span>
+        <span class="speed-seg">LAP 1</span>
+        <span class="speed-seg">HALFWAY</span>
+        <span class="speed-seg">FINAL LAP</span>
+        <span class="speed-seg">🏁 FINISH</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Telemetry bar -->
+<div class="telemetry">
+  <div class="tel-item">DRS <strong id="drs-status">ON</strong></div>
+  <div class="tel-item">LAP <strong id="tel-lap">0/0</strong></div>
+  <div class="tel-scroll">
+    <span class="tel-inner">◆ PIT WALL COMMAND CENTER ◆ RACE DAY TASK MANAGER ◆ STAY FOCUSED — PUSH THE LIMITS ◆ EVERY SECOND COUNTS ◆ LIGHTS OUT AND AWAY WE GO ◆ RED BULL RACING ◆ 4K CINEMATIC ◆</span>
+  </div>
+</div>
+
+<script>
+// ── VIDEO ─────────────────────────────────────────────────────────────────
+const video = document.getElementById('bg-video');
+
+video.addEventListener('canplay', () => {
+  video.classList.add('loaded');
+  document.getElementById('video-error').style.display = 'none';
+});
+
+video.addEventListener('error', () => {
+  document.getElementById('video-error').style.display = 'block';
+});
+
+// Fallback check after delay
+setTimeout(() => {
+  if (video.readyState === 0) {
+    document.getElementById('video-error').style.display = 'block';
+  }
+}, 5000);
+
+// ── LIGHTS OUT SEQUENCE ───────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  setTimeout(() => {
+    document.getElementById('loading').classList.add('hide');
+
+    const lo = document.getElementById('lights-out');
+    lo.classList.add('show');
+
+    const ids = ['l1','l2','l3','l4','l5'];
+
+    // Light up one by one
+    ids.forEach((id, i) => {
+      setTimeout(() => {
+        document.getElementById(id).classList.add('on');
+      }, i * 420);
+    });
+
+    // All go dark — GO!
+    setTimeout(() => {
+      ids.forEach(id => {
+        const el = document.getElementById(id);
+        el.classList.remove('on');
+        el.classList.add('off');
+      });
+      setTimeout(() => {
+        lo.style.opacity = '0';
+        setTimeout(() => { lo.style.display = 'none'; }, 500);
+      }, 700);
+    }, ids.length * 420 + 900);
+
+  }, 2200);
+});
+
+// ── TODO LOGIC ────────────────────────────────────────────────────────────
+let todos = [];
+try { todos = JSON.parse(localStorage.getItem('f1-race-todos-v3') || '[]'); } catch(e) {}
+let filter = 'all';
+
+function save() { try { localStorage.setItem('f1-race-todos-v3', JSON.stringify(todos)); } catch(e) {} }
+
+function updateStats() {
+  const total = todos.length;
+  const done = todos.filter(t => t.done).length;
+  const pct = total ? Math.round(done / total * 100) : 0;
+  document.getElementById('st-total').textContent = total;
+  document.getElementById('st-done').textContent = done;
+  document.getElementById('st-pct').textContent = pct + '%';
+  document.getElementById('lap-num').textContent = total;
+  document.getElementById('spd-bar').style.width = pct + '%';
+  document.getElementById('spd-pct').textContent = pct + '%';
+  document.getElementById('tel-lap').textContent = done + '/' + total;
+  document.getElementById('drs-status').textContent = pct >= 50 ? 'ACTIVE' : 'ON';
+}
+
+const filterLabels = { all:'All Tasks', active:'Active Tasks', done:'Completed', high:'High Priority', medium:'Medium Priority', low:'Low Priority' };
+
+function getFiltered() {
+  if (filter === 'active') return todos.filter(t => !t.done);
+  if (filter === 'done') return todos.filter(t => t.done);
+  if (filter === 'high') return todos.filter(t => t.priority === 'high');
+  if (filter === 'medium') return todos.filter(t => t.priority === 'medium');
+  if (filter === 'low') return todos.filter(t => t.priority === 'low');
+  return todos;
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function render() {
+  const list = document.getElementById('todo-list');
+  const empty = document.getElementById('empty');
+  const filtered = getFiltered();
+  document.getElementById('f-label').textContent = filterLabels[filter];
+  Array.from(list.children).forEach(c => { if (c.classList.contains('todo-item')) c.remove(); });
+
+  if (!filtered.length) {
+    empty.style.display = 'block';
+  } else {
+    empty.style.display = 'none';
+    filtered.forEach(t => {
+      const el = document.createElement('div');
+      el.className = `todo-item p${t.priority[0]}${t.done ? ' done' : ''}`;
+      el.dataset.id = t.id;
+      el.innerHTML = `
+        <div class="cbx${t.done ? ' chk' : ''}" data-chk="${t.id}"><span class="chk-ic">✓</span></div>
+        <span class="todo-text">${esc(t.text)}</span>
+        <span class="pbadge ${t.priority}">${t.priority}</span>
+        <button class="del-btn" data-del="${t.id}">✕</button>
+      `;
+      list.appendChild(el);
+    });
+  }
+  updateStats();
+}
+
+function addTodo() {
+  const inp = document.getElementById('task-input');
+  const text = inp.value.trim();
+  const priority = document.getElementById('prio-sel').value;
+  if (!text) {
+    inp.focus();
+    inp.style.borderColor = 'var(--red)';
+    inp.style.boxShadow = '0 0 16px rgba(225,6,0,0.4)';
+    setTimeout(() => { inp.style.borderColor = ''; inp.style.boxShadow = ''; }, 900);
+    return;
+  }
+  todos.unshift({ id: Date.now(), text, priority, done: false });
+  inp.value = '';
+  save(); render();
+}
+
+document.getElementById('add-btn').addEventListener('click', addTodo);
+document.getElementById('task-input').addEventListener('keydown', e => { if (e.key === 'Enter') addTodo(); });
+
+document.getElementById('todo-list').addEventListener('click', e => {
+  const chk = e.target.closest('[data-chk]');
+  const del = e.target.closest('[data-del]');
+  if (chk) { const t = todos.find(t => t.id == chk.dataset.chk); if (t) { t.done = !t.done; save(); render(); } }
+  if (del) { todos = todos.filter(t => t.id != del.dataset.del); save(); render(); }
+});
+
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active'); filter = btn.dataset.f; render();
+  });
+});
+
+document.getElementById('clear-done').addEventListener('click', () => { todos = todos.filter(t => !t.done); save(); render(); });
+
+render();
+</script>
+</body>
+</html>
